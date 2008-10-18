@@ -25,6 +25,8 @@ can_ok( 'WWW::LimerickDB', qw/
         limerick
         limericks
         ua
+        new_line
+        get_cached
         _get
         _parse_quotes
         _set_error

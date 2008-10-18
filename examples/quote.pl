@@ -14,8 +14,4 @@ my $l = WWW::LimerickDB->new;
 $l->get_limerick(shift)
     or die $l->error;
 
-use Data::Dumper;
-$Data::Dumper::Useqq=1;
-print Dumper $l->limerick;
-
 print $l . "\n";

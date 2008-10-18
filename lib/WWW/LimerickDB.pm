@@ -3,7 +3,7 @@ package WWW::LimerickDB;
 use warnings;
 use strict;
 
-our $VERSION = '0.0101';
+our $VERSION = '0.0201';
 
 use LWP::UserAgent;
 use HTML::TokeParser::Simple;
@@ -16,6 +16,7 @@ __PACKAGE__->mk_classaccessors qw/
     ua
     limericks
     limerick
+    new_line
 /;
 
 sub new {
@@ -28,6 +29,10 @@ sub new {
         agent   => 'Mozilla',
         timeout => 30,
     );
+
+    unless ( defined $args{new_line} ) {
+        $args{new_line} = "\n";
+    }
 
     my $self = bless {}, $class;
 
@@ -46,6 +51,29 @@ sub get_high_random { shift->_get('random2'); }
 sub get_limerick {
     my ( $self, $num ) = @_;
     return $self->_get($num);
+}
+
+sub get_cached {
+    my ( $self, $method, $reset ) = @_;
+    unless ( $method =~ // ) {
+        return $self->_set_error('Method must be either top|bottom|latest|random|high_random');
+    }
+    if ( $reset or not @{ $self->limericks } ) {
+        print "\n\n\n\n\n#### NEW FETCH\n\n\n";
+        my $error_count = 0;
+        REDO_ON_ERROR: {
+            if ( $error_count > 2 ) {
+                return $self->_set_error(q|Can't fetch, last error: | . $self->error);
+            }
+
+            $self->${\"get_$method"}
+                or $error_count++
+                and redo;
+        }
+    }
+    my $ret = shift @{ $self->limericks };
+    $self->limerick( $self->limericks->[0] );
+    return $ret;
 }
 
 sub _get {
@@ -88,7 +116,11 @@ sub _parse_quotes {
             $cur_quote =~ s/[^\S\n]+/ /g;
             $cur_quote =~ s/^\s+//;
             $cur_quote =~ s/\s+$//;
+            
+            my $nl = $self->new_line;
+            $cur_quote =~ s/\n/$nl/g;
             push @quotes, $cur_quote;
+            $get_quote_text = 0;
             $cur_quote = '';
         }
     }
@@ -100,7 +132,12 @@ sub _parse_quotes {
 
 sub _set_error {
     my ( $self, $response ) = @_;
-    $self->error( "Network error: " . $response->status_line );
+    if ( ref $response ) {
+        $self->error( "Network error: " . $response->status_line );
+    }
+    else {
+        $self->error( $response );
+    }
     return;
 }
 
@@ -136,10 +173,11 @@ L<http://limerickdb.com/>
     my $lime = WWW::LimerickDB->new;
 
     my $lime = WWW::LimerickDB->new(
-        ua => LWP::UserAgent->new( agent => 'Fox', timeout => 50 ),
+        ua       => LWP::UserAgent->new( agent => 'Fox', timeout => 50 ),
+        new_line => '/',
     );
 
-Constructs and returns a freshly cooked C<WWW::LimerickDB> object. Takes one optional argument
+Constructs and returns a freshly cooked C<WWW::LimerickDB> object. Takes two optional arguments
 in a key/value fashion.
 
 =head3 C<ua>
@@ -149,8 +187,17 @@ in a key/value fashion.
     );
 
 B<Optional>. Takes an L<LWP::UserAgent>-like object as a value, in other words an object with
-a C<get()> method that returns L<HTTP::Response> object. By default, the following will be
+a C<get()> method that returns L<HTTP::Response> object. B<By default>, the following will be
 used: C<< LWP::UserAgent->new( agent => 'Mozilla', timeout => 30 ) >>
+
+=head3 C<new_line>
+
+    my $lime = WWW::LimerickDB->new(
+        new_line => '/',
+    );
+
+B<Optional>. Takes a string as a value. All "new line" (C<\n>) characters in fetched
+limericks will be replaced by this character. B<Defaults to:> C<\n> (no replacing of new lines)
 
 =head1 FETCHING METHODS
 
@@ -201,6 +248,59 @@ Takes no arguments. On success returns an arrayref of "Random" limericks.
 Takes no arguments. On success returns an arrayref of "Random > 0" (i.e. random with
 no negative ratings) limericks.
 
+=head2 C<get_cached>
+
+    my $limerick = $lime->get_cached( 'random', 'reset' );
+
+    for ( 1 .. 1000 ) {
+        print $lime->get_cached('random');
+    }
+
+Takes one mandatory and one optional arguments. The first argument is a string that must
+be one of the following:
+
+    top
+    bottom
+    latest
+    random
+    high_random
+
+Each of those corresponds to one of the "fetching methods", i.e. C<top> corresponds to
+C<get_top()>. The second (optional) argument takes either true or false values. If true
+value is specified then C<get_cached()> will reset the cached limericks... read along to
+understand. The C<get_cached()> method fetches the limericks using the method you specified
+as the first argument. That call fills in an arrayref of limericks (avalaible via
+C<limericks()> call described below). When that arrayref gets empty, C<get_cached()>
+does a new fetch automatically. When the second optional argument is provided, C<get_cached()>
+will reset that arrayref and make a call for a new fetch. You can also "reset" by
+giving an empty arrayref to C<limericks()> method. In other words, these two are the
+same:
+
+    print $lime->get_cached('random', 1) . "\n";
+    for ( 1..1000 ) {
+        print $lime->get_cached('random');
+    }
+
+    # SAME AS
+
+    $lime->limericks( [] );
+    for ( 1..1001 ) {
+        print $lime->get_cached('random');
+    }
+
+Calls to C<get_cached()> also adjust the return value of C<limerick()> method (see below) so
+it points to the next limerick to be returned by C<get_cached()> providing there
+is enough limericks still available.
+
+If you never called any of the "fetching methods" before calling C<get_cached()> you do NOT
+need to reset anything, in fact, you do not have to reset anything at all if you do not
+wish to do so. The only reason for resetting is to fetch new limericks and avoid use of
+whatever is there already available via C<limericks()> method.
+
+If a network error occurs during the "refreshing" of limericks by C<get_cached()> it will
+retry 2 more times, if all attempts fail it will return either C<undef> or an empty list
+with the last error available via C<error()> method.
+
 =head1 OTHER METHODS
 
 =head2 C<error>
@@ -232,11 +332,24 @@ obtain the value of the call to C<limerick()>.
 
     my $limericks_ref = $lime->limericks;
 
-Note the B<plural> form. Takes no arguments.
-Must be called after a successful call to one of the "FETCHING
-METHODS". Returns the same arrayref as all but C<get_limerick()> fetching methods return. In
-case of method being C<get_lamerick()> returns an arrayref with just one quote that was
+    $lime->limericks( [] );
+
+Note the B<plural> form. When called with an B<optional> argument assigns that value as
+a list of limericks, generally you'd only want to do that when using C<get_cached()> method.
+Without an argument must be called after a successful call to one of the "FETCHING
+METHODS" or after assigning something meaningingful.
+Returns the same arrayref as all but C<get_limerick()> fetching methods returned. In
+case of method being C<get_limerick()> returns an arrayref with just one quote that was
 fetched.
+
+=head2 C<new_line>
+
+    my $old_new_line_char = $lime->new_line;
+    $lime->new_line('/');
+
+Returns the currently used "new line" character. When called with an argument sets that
+argument as a new line character used by the module. See C<new_line> argument to
+constructor for more details.
 
 =head2 C<ua>
 
