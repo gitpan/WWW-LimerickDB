@@ -1,5 +1,8 @@
 Revision history for WWW-LimerickDB
 
+0.0202  October 18, 2008
+        Fixed a bug that prevented calls to get_cached() without calling anything else first
+
 0.0201  October 18, 2008
         Added new_line argument/method and get_cached method
         Fixed a lame bug where only the first lamerick was fine
