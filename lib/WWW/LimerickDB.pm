@@ -3,7 +3,7 @@ package WWW::LimerickDB;
 use warnings;
 use strict;
 
-our $VERSION = '0.0303';
+our $VERSION = '0.0304';
 
 use LWP::UserAgent;
 use HTML::TokeParser::Simple;
