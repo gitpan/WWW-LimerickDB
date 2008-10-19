@@ -3,12 +3,12 @@ package WWW::LimerickDB;
 use warnings;
 use strict;
 
-our $VERSION = '0.0203';
+our $VERSION = '0.0303';
 
 use LWP::UserAgent;
 use HTML::TokeParser::Simple;
 use HTML::Entities;
-use overload q|""| => sub { shift->limerick };
+use overload q|""| => sub { shift->limerick->{text} };
 
 use base 'Class::Data::Accessor';
 __PACKAGE__->mk_classaccessors qw/
@@ -50,15 +50,20 @@ sub get_high_random { shift->_get('random2'); }
 
 sub get_limerick {
     my ( $self, $num ) = @_;
-    return $self->_get($num);
+    my $limerick = $self->_get($num);
+    ref $limerick
+        or return;
+
+    return $limerick->[0];
 }
 
 sub get_cached {
     my ( $self, $method, $reset ) = @_;
-    unless ( $method =~ // ) {
+    $reset ||= 0;
+    unless ( $method =~ /top|bottom|latest|random|high_random/ ) {
         return $self->_set_error('Method must be either top|bottom|latest|random|high_random');
     }
-    if ( $reset or not @{ $self->limericks || [] } ) {
+    if ( @{ $self->limericks || [] } < $reset or not @{ $self->limericks || [] } ) {
         my $error_count = 0;
         REDO_ON_ERROR: {
             if ( $error_count > 2 ) {
@@ -86,7 +91,7 @@ sub _get {
     $response->is_success
         or return $self->_set_error( $response );
 
-    $self->_parse_quotes( $response->decoded_content );
+    return $self->_parse_quotes( $response->decoded_content );
 }
 
 sub _parse_quotes {
@@ -94,33 +99,52 @@ sub _parse_quotes {
 
     my $p = HTML::TokeParser::Simple->new( \ $html );
     my @quotes;
-    my $cur_quote = '';
-    my $get_quote_text = 0;
+    my $cur_quote = { text => '' };
+    my %nav;
+    @nav{ qw/get_quote_text  get_rating/ } = (0, 0);
     while ( my $t = $p->get_token ) {
-        if ( $t->is_start_tag('div')
+        if ( $t->is_start_tag('a')
+            and defined $t->get_attr('href')
+            and my ( $number ) = $t->get_attr('href') =~ /^\?(\d+)$/
+        ) {
+            $cur_quote->{number} = $number;
+        }
+        elsif ( $t->is_start_tag('a')
+            and defined $t->get_attr('href')
+            and $t->get_attr('href') =~ /^\?ratingplus/
+        ) {
+            $nav{get_rating} = 1;
+        }
+        elsif ( $nav{get_rating} == 1 and $t->is_end_tag('a') ) {
+            $nav{get_rating} = 2;
+        }
+        elsif ( $nav{get_rating} == 2 and $t->is_text ) {
+            $cur_quote->{rating} = $t->as_is;
+            $cur_quote->{rating} =~ s/[^\d-]+//g;
+            $nav{get_rating} = 0;
+        }
+        elsif ( $t->is_start_tag('div')
             and defined $t->get_attr('class')
             and $t->get_attr('class') eq 'quote_output'
         ) {
-            $get_quote_text = 1;
+            $nav{get_quote_text} = 1;
         }
-        elsif ( $get_quote_text and $t->is_text ) {
-            $cur_quote .= $t->as_is;
+        elsif ( $nav{get_quote_text} and $t->is_text ) {
+            $cur_quote->{text} .= $t->as_is;
         }
-        elsif ( $get_quote_text and $t->is_start_tag('br') ) {
-            #$cur_quote .= "\n";
-        }
-        elsif ( $get_quote_text and $t->is_end_tag('div') ) {
-            decode_entities $cur_quote;
-            $cur_quote =~ s/\240/ /g;
-            $cur_quote =~ s/[^\S\n]+/ /g;
-            $cur_quote =~ s/^\s+//;
-            $cur_quote =~ s/\s+$//;
-            
-            my $nl = $self->new_line;
-            $cur_quote =~ s/\n/$nl/g;
+        elsif ( $nav{get_quote_text} and $t->is_end_tag('div') ) {
+            decode_entities $cur_quote->{text};
+            for ( $cur_quote->{text} ) {
+                s/\240/ /g;
+                s/[^\S\n]+/ /g;
+                s/^\s+//;
+                s/\s+$//;
+                my $nl = $self->new_line;
+                s/\n/$nl/g;
+            }
             push @quotes, $cur_quote;
-            $get_quote_text = 0;
-            $cur_quote = '';
+            $nav{get_quote_text} = 0;
+            $cur_quote = { text => '' };
         }
     }
 
@@ -203,53 +227,96 @@ limericks will be replaced by this character. B<Defaults to:> C<\n> (no replacin
 All of fetching methods return either C<undef> or an empty list on failure and
 the reason for failure will be available via C<error> method (see below).
 
+=head2 LIMERICK HASHREF
+
+    {
+        'number' => '5',
+        'text' => 'There is something about satyriasis
+                    That arouses psychiatrists\' biases.
+                    But we\'re both very pleased
+                    we\'re this way diseased,
+                    as the damsel who\'s waiting to try us is.',
+        'rating' => '-12'
+    }
+
+All of the fetching method return either one of these hashrefs or an arrayref filled with
+them. The keys/values of these hashrefs are as follows:
+
+=head3 C<number>
+
+    'number' => '5',
+
+Contains the number of the limerick on the site. This can also be used to construct the
+URI pointing to the limerick on the site, i.e. L<http://limerickdb.com/?5>
+
+=head3 C<rating>
+
+    'rating' => '-12'
+
+Contains the rating of the limerick, this will match C</[\d-]+/>.
+
+=head3 C<text>
+
+    'text' => 'There is something about satyriasis
+            That arouses psychiatrists\' biases. 
+            But we\'re both very pleased 
+            we\'re this way diseased, 
+            as the damsel who\'s waiting to try us is.',
+
+Contains the actual text of the limerick.
+
 =head2 C<get_limerick>
 
     my $limerick = $lime->get_limerick(288)
         or die $lime->error;
 
 Takes one mandatory argument which is the number of the limerick you wish to retrieve.
-On success returns a string containing your quote.
+On success returns a "limerick hashref" described above.
 
 =head2 C<get_top>
 
     my $top_limericks_ref = $lime->get_top
         or die $lime->error;
 
-Takes no arguments. On success returns an arrayref of "Top" rated limericks.
+Takes no arguments. On success returns an arrayref of "limerick hashrefs" that represent
+"Top" rated limericks.
 
 =head2 C<get_bottom>
 
     my $lime_limericks_ref = $lime->get_bottom
         or die $lime->error;
 
-Takes no arguments. On success returns an arrayref of "Bottom" rated limericks.
+Takes no arguments. On success returns an arrayref of "limerick hashrefs" that represent
+"Bottom" rated limericks.
 
 =head2 C<get_latest>
 
     my $latest_limericks_ref = $lime->get_latest
         or die $lime->error;
 
-Takes no arguments. On success returns an arrayref of "Latest" limericks.
+Takes no arguments. On success returns an arrayref of "limerick hashrefs" that represent
+"Latest" limericks.
 
 =head2 C<get_random>
 
     my $random_limericks_ref = $lime->get_random
         or die $lime->error;
 
-Takes no arguments. On success returns an arrayref of "Random" limericks.
+Takes no arguments. On success returns an arrayref of "limerick hashrefs" that represent
+"Random" limericks.
 
 =head2 C<get_high_random>
 
     my $random_high_limericks_ref = $lime->get_high_random
         or die $lime->error;
 
-Takes no arguments. On success returns an arrayref of "Random > 0" (i.e. random with
+Takes no arguments. On success returns an arrayref of "limerick hashrefs" that represent
+"Random > 0" (i.e. random with
 no negative ratings) limericks.
 
 =head2 C<get_cached>
 
-    my $limerick = $lime->get_cached( 'random', 'reset' );
+    my $limerick = $lime->get_cached( 'random', 10 );
 
     for ( 1 .. 1000 ) {
         print $lime->get_cached('random');
@@ -265,26 +332,28 @@ be one of the following:
     high_random
 
 Each of those corresponds to one of the "fetching methods", i.e. C<top> corresponds to
-C<get_top()>. The second (optional) argument takes either true or false values. If true
-value is specified then C<get_cached()> will reset the cached limericks... read along to
+C<get_top()>. The second (optional) argument takes an integer value. If the
+number of available limericks is less than the value specified then C<get_cached()> will
+fetch some fresh limericks... read along to
 understand. The C<get_cached()> method fetches the limericks using the method you specified
-as the first argument. That call fills in an arrayref of limericks (avalaible via
+as the first argument. That call fills in an arrayref of limerick hashrefs (avalaible via
 C<limericks()> call described below). When that arrayref gets empty, C<get_cached()>
 does a new fetch automatically. When the second optional argument is provided, C<get_cached()>
-will reset that arrayref and make a call for a new fetch. You can also "reset" by
+will refill that arrayref if it contains less than the specified number
+and make a call for a new fetch. You can also "reset" by
 giving an empty arrayref to C<limericks()> method. In other words, these two are the
 same:
 
-    print $lime->get_cached('random', 1) . "\n";
+    print $lime->get_cached('random', 100000)->{text} . "\n";
     for ( 1..1000 ) {
-        print $lime->get_cached('random');
+        print $lime->get_cached('random')->{text};
     }
 
     # SAME AS
 
     $lime->limericks( [] );
     for ( 1..1001 ) {
-        print $lime->get_cached('random');
+        print $lime->get_cached('random')->{text};
     }
 
 Calls to C<get_cached()> also adjust the return value of C<limerick()> method (see below) so
@@ -314,7 +383,7 @@ a fetching method failed.
 
 =head2 C<limerick>
 
-    my $limerick = $lime->limerick;
+    my $limerick = $lime->limerick->{text};
 
     # OR
 
@@ -324,8 +393,9 @@ Note the B<singular> form. Takes no arguments.
 Must be called after a successful call to one of the "FETCHING
 METHODS". If the "fetching method" is a C<get_limerick()> returns the same limerick that
 call returned; otherwise, returns the first quote out of quotes retrieved. B<This method
-is overloaded> on C<q|""|>, in other words, you can interpolate the object in a string to
-obtain the value of the call to C<limerick()>.
+is overloaded> on C<q|""|> and returns the value of C<{text}> key in "limerick hashref",
+in other words, you can interpolate the object in a string to obtain the value of the call to
+C<limerick()->{text}>.
 
 =head2 C<limericks>
 

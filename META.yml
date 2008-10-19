@@ -1,6 +1,6 @@
 ---
 name: WWW-LimerickDB
-version: 0.0203
+version: 0.0303
 author:
   - "Zoffix <'zoffix@cpan.org'>"
 abstract: interface to fetch limericks from http://limerickdb.com/
@@ -18,7 +18,7 @@ build_requires:
 provides:
   WWW::LimerickDB:
     file: lib/WWW/LimerickDB.pm
-    version: 0.0203
+    version: 0.0303
 generated_by: Module::Build version 0.2808
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.2.html

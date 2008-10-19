@@ -1,5 +1,8 @@
 Revision history for WWW-LimerickDB
 
+0.0303  October 19, 2008
+        Changed parser to get the number and rating of limericks, changed the return values.
+
 0.0203  October 18, 2008
         Fixed a retarded bug that caused unwanted print()s
 

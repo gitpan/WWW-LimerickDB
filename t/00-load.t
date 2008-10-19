@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-use Test::More tests => 10;
+use Test::More tests => 12;
 
 BEGIN {
     use_ok('LWP::UserAgent');
@@ -44,12 +44,18 @@ SKIP: {
     unless ( defined $quote ) {
         diag "Fetching error: " . $lime->error;
         ok( length($lime->error), "We got error from error method" );
-        skip "Network error", 0;
+        skip "Network error", 2;
     }
 
-    my $VAR1 = "There once was a priest from Morocco \nWho's motto was really quite macho \nHe said \"To be blunt \nGod decreed we eat cunt. \nWhy else would it look like a taco?\"";
+    my $VAR1 = {
+            "number" => 288,
+            "text" => "There once was a priest from Morocco \nWho's motto was really quite macho \nHe said \"To be blunt \nGod decreed we eat cunt. \nWhy else would it look like a taco?\"",
+            "rating" => 42
+    };
 
-    is( $lime->limerick, $VAR1, "fetched matches expected" );
+    is( $lime->limerick->{text}, "$lime", 'overload of limerick()');
+    is_deeply( $lime->limerick, $VAR1, "fetched matches expected" );
+    is_deeply( $lime->limerick, $quote, "return of get_limerick() matches expected");
 }
 
 
