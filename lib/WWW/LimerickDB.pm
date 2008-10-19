@@ -3,7 +3,7 @@ package WWW::LimerickDB;
 use warnings;
 use strict;
 
-our $VERSION = '0.0202';
+our $VERSION = '0.0203';
 
 use LWP::UserAgent;
 use HTML::TokeParser::Simple;
@@ -59,7 +59,6 @@ sub get_cached {
         return $self->_set_error('Method must be either top|bottom|latest|random|high_random');
     }
     if ( $reset or not @{ $self->limericks || [] } ) {
-        print "\n\n\n\n\n#### NEW FETCH\n\n\n";
         my $error_count = 0;
         REDO_ON_ERROR: {
             if ( $error_count > 2 ) {

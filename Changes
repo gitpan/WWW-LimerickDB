@@ -1,5 +1,8 @@
 Revision history for WWW-LimerickDB
 
+0.0203  October 18, 2008
+        Fixed a retarded bug that caused unwanted print()s
+
 0.0202  October 18, 2008
         Fixed a bug that prevented calls to get_cached() without calling anything else first
 
